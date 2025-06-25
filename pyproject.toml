@@ -1,0 +1,16 @@
+[project]
+name = "study-slack-remote-mcp"
+version = "0.1.0"
+description = "MCP server for Slack integration with OAuth authentication and cloud deployment support"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.9.4",
+    "python-dotenv>=1.1.1",
+    "requests",
+    "boto3>=1.35.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "fastmcp>=2.9.0",
+]

@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+venv
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Local development files
+.env
+*.log
+.DS_Store
+.vscode
+.idea
+
+# Token storage (contains sensitive data)
+slack_tokens.jsonl
+*.jsonl
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+
+# Development tools
+.coverage
+htmlcov/
+.tox/
+.cache/
+.pytest_cache/
