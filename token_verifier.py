@@ -1,11 +1,10 @@
 """トークン検証の実装（セッション対応版）"""
 
-import os
 from typing import Optional
 
+from parameter_store import get_parameter_store_client
 from session_manager import SessionTokenManager
 from slack_auth_provider import SlackAuthProvider
-from parameter_store import get_parameter_store_client
 
 
 class AccessToken:
@@ -33,9 +32,9 @@ class SlackTokenVerifier:
         # Parameter Store または環境変数からSlackアプリのクレデンシャルを取得
         parameter_store = get_parameter_store_client()
         slack_config = parameter_store.get_slack_config()
-        
-        client_id = slack_config['client_id']
-        client_secret = slack_config['client_secret']
+
+        client_id = slack_config["client_id"]
+        client_secret = slack_config["client_secret"]
 
         if not client_id or not client_secret:
             raise RuntimeError(
