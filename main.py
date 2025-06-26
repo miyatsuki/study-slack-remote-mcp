@@ -304,7 +304,7 @@ def main():
         return
 
     scope = "chat:write,channels:read"  # 2.3 で設定したScope
-    port = 8443  # 固定ポート
+    port = 8000  # MCP server port for OAuth callback
 
     print("=== Slack OAuth 認証開始 ===")
 

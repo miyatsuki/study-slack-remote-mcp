@@ -120,17 +120,11 @@ export class SlackMcpStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    // Allow traffic from ALB to application container ports
+    // Allow traffic from ALB to application container port
     fargateSg.addIngressRule(
       albSg,
-      ec2.Port.tcp(8001),
-      'Allow traffic from ALB to application port 8001'
-    );
-    
-    fargateSg.addIngressRule(
-      albSg,
-      ec2.Port.tcp(8002),
-      'Allow traffic from ALB to health check port 8002'
+      ec2.Port.tcp(8000),
+      'Allow traffic from ALB to application port 8000'
     );
 
     return {
@@ -278,13 +272,13 @@ export class SlackMcpStack extends cdk.Stack {
     // Create target group for application
     this.targetGroup = new elbv2.ApplicationTargetGroup(this, 'SlackMcpTargetGroup', {
       vpc: this.vpc,
-      port: 8001,  // Application port
+      port: 8000,  // Application port
       protocol: elbv2.ApplicationProtocol.HTTP,
       targetType: elbv2.TargetType.IP,
       healthCheck: {
         enabled: true,
         path: '/health',
-        port: '8002',  // Use port 8002 for health checks
+        port: '8000',  // Use application port for health checks
         protocol: elbv2.Protocol.HTTP,
         interval: cdk.Duration.seconds(60),
         timeout: cdk.Duration.seconds(10),
@@ -368,12 +362,7 @@ export class SlackMcpStack extends cdk.Stack {
     });
 
     container.addPortMappings({
-      containerPort: 8001,  // Application port
-      protocol: ecs.Protocol.TCP,
-    });
-    
-    container.addPortMappings({
-      containerPort: 8002,  // Health check port
+      containerPort: 8000,  // Application port
       protocol: ecs.Protocol.TCP,
     });
 

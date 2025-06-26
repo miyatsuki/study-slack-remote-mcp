@@ -24,13 +24,12 @@ COPY . .
 # Create directory for local token storage (fallback)
 RUN mkdir -p /app/data
 
-# Expose ports
-EXPOSE 8001
-EXPOSE 8002
+# Expose port
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8001/health || curl -f http://localhost:8002/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

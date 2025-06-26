@@ -1,6 +1,5 @@
 """セッション管理とトークンキャッシュ"""
 
-import asyncio
 import time
 import uuid
 from typing import Dict, Optional
