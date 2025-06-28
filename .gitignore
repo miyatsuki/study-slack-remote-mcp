@@ -20,3 +20,4 @@ infrastructure/cdk.context.json
 # Other
 .claude
 .vscode
+slack_tokens.jsonl
