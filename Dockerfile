@@ -16,7 +16,7 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e .
 
 # Install additional AWS dependencies for cloud deployment
-RUN pip install --no-cache-dir boto3 uvicorn
+RUN pip install --no-cache-dir boto3 uvicorn httpx starlette
 
 # Copy application code
 COPY . .
@@ -25,16 +25,12 @@ COPY . .
 RUN mkdir -p /app/data
 
 # Expose port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+EXPOSE 8080
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV TOKEN_STORAGE_PATH=/app/data/slack_tokens.jsonl
 
-# Run the server
+# Run the server directly
 CMD ["python", "server.py"]

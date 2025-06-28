@@ -39,29 +39,15 @@ docker tag "$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_URI:$IMAGE_TAG"
 echo "📤 ECR にプッシュ中..."
 docker push "$ECR_URI:$IMAGE_TAG"
 
-# ECSサービスを更新
-echo "🔄 ECSサービスを更新中..."
-CLUSTER_NAME="slack-mcp-cluster-$ENV_NAME"
-SERVICE_NAME="slack-mcp-service-$ENV_NAME"
-
-aws ecs update-service \
-  --cluster "$CLUSTER_NAME" \
-  --service "$SERVICE_NAME" \
-  --force-new-deployment \
-  --region "$AWS_REGION" \
-  --no-cli-pager > /dev/null
-
-echo "⏳ サービス更新の完了を待機中..."
-aws ecs wait services-stable \
-  --cluster "$CLUSTER_NAME" \
-  --services "$SERVICE_NAME" \
-  --region "$AWS_REGION"
-
+# App Runnerサービスを更新するには、再度CDKデプロイを実行する必要があります
 echo ""
-echo "✅ 完了!"
+echo "✅ イメージのプッシュが完了しました!"
 echo "   イメージURI: $ECR_URI:$IMAGE_TAG"
-echo "   クラスター: $CLUSTER_NAME"
-echo "   サービス: $SERVICE_NAME"
 echo ""
-echo "🔗 サービス確認:"
-echo "   https://slackm-slack-zekchul6htrp-213900238.ap-northeast-1.elb.amazonaws.com/health"
+echo "📝 次のステップ:"
+echo "   1. CDKを使用してApp Runnerを更新:"
+echo "      cd $PROJECT_ROOT/infrastructure"
+echo "      ./deploy.sh $ENV_NAME"
+echo ""
+echo "   2. App Runnerのデプロイ状況を確認:"
+echo "      AWS Console > App Runner > slack-mcp-server-$ENV_NAME"

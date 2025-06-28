@@ -6,7 +6,6 @@ from typing import Optional
 
 import httpx
 
-from parameter_store import get_parameter_store_client
 from session_manager import SessionTokenManager
 from storage_interface import create_token_storage, is_cloud_environment
 
@@ -124,16 +123,12 @@ class SlackAuthProvider:
     async def _perform_cloud_oauth_flow(self, session_id: str) -> bool:
         """クラウド環境でのOAuth認証フロー（手動認証）"""
         try:
-            # クラウド環境では、Parameter Store からサービスのパブリックURLを取得
-            parameter_store = get_parameter_store_client()
-            slack_config = parameter_store.get_slack_config()
-            base_url = slack_config["service_base_url"]
+            # クラウド環境では、環境変数からサービスのパブリックURLを取得
+            import os
+            base_url = os.getenv("SERVICE_BASE_URL")
 
             if not base_url:
-                print("❌ SERVICE_BASE_URL パラメータが設定されていません")
-                print(
-                    "💡 Parameter Store に /slack-mcp/service-base-url を設定してください"
-                )
+                print("❌ SERVICE_BASE_URL 環境変数が設定されていません")
                 return False
 
             callback_url = f"{base_url}/oauth/callback"

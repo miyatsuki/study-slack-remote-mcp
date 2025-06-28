@@ -17,10 +17,11 @@ from token_verifier import SlackTokenVerifier
 load_dotenv()
 
 # Create MCP server instance using official MCP SDK's FastMCP
-mcp = FastMCP("slack-mcp-server")
+# Bind to 0.0.0.0:8080 to allow external access
+mcp = FastMCP("slack-mcp-server", host="0.0.0.0", port=8080)
 
-# Token verifier instance
-token_verifier = SlackTokenVerifier()
+# Token verifier instance - lazy initialization to speed up startup
+token_verifier = None
 
 # Track OAuth initiation per session
 oauth_initiated_sessions: Dict[str, bool] = {}
@@ -44,6 +45,12 @@ def get_user_identifier() -> str:
 
 async def get_session_slack_token() -> Optional[str]:
     """Get Slack token for current session (initiates OAuth on first call)"""
+    global token_verifier
+
+    # Lazy initialize token verifier on first use
+    if token_verifier is None:
+        token_verifier = SlackTokenVerifier()
+
     # Get unique user identifier
     user_id = get_user_identifier()
     print(f"🔍 User identifier: {user_id}")
@@ -205,6 +212,12 @@ async def get_auth_status() -> dict:
     Returns:
         認証状態とセッション情報のディクショナリ
     """
+    global token_verifier
+
+    # Lazy initialize token verifier on first use
+    if token_verifier is None:
+        token_verifier = SlackTokenVerifier()
+
     # Get user identifier
     user_id = get_user_identifier()
 
@@ -241,6 +254,12 @@ async def get_auth_status() -> dict:
 @mcp.resource("session://info")
 async def get_session_info() -> dict:
     """Get current session information"""
+    global token_verifier
+
+    # Lazy initialize token verifier on first use
+    if token_verifier is None:
+        token_verifier = SlackTokenVerifier()
+
     # Get user identifier
     user_id = get_user_identifier()
 
@@ -440,18 +459,15 @@ async def exchange_oauth_code(code: str) -> Optional[Dict]:
 
     # Build redirect URI based on environment
     if is_cloud_environment():
-        from parameter_store import get_parameter_store_client
-
-        parameter_store = get_parameter_store_client()
-        slack_config = parameter_store.get_slack_config()
-        base_url = slack_config.get("service_base_url")
+        # In cloud environment, get from environment variable (set by App Runner)
+        base_url = os.getenv("SERVICE_BASE_URL")
         if not base_url:
-            print("Missing service_base_url in cloud environment")
+            print("Missing SERVICE_BASE_URL environment variable")
             return None
         redirect_uri = f"{base_url}/oauth/callback"
     else:
-        # Local development - use MCP server port (8000)
-        redirect_uri = "http://localhost:8000/oauth/callback"
+        # Local development - use MCP server port (8080)
+        redirect_uri = "http://localhost:8080/oauth/callback"
 
     token_url = "https://slack.com/api/oauth.v2.access"
 
@@ -474,11 +490,17 @@ async def exchange_oauth_code(code: str) -> Optional[Dict]:
 
 def run_server():
     """Run MCP server with custom routes"""
+    # Check if running in Docker
+    is_docker = os.getenv("DOCKER_ENV") or os.path.exists("/.dockerenv")
+
     # Run MCP server with HTTP transport
-    print("📍 MCP endpoint: http://0.0.0.0:8000/mcp")
-    print("💚 Health check: http://0.0.0.0:8000/health")
-    print("🔗 OAuth callback: http://0.0.0.0:8000/oauth/callback")
+    print("📍 MCP endpoint: http://0.0.0.0:8080/mcp")
+    print("💚 Health check: http://0.0.0.0:8080/health")
+    print("🔗 OAuth callback: http://0.0.0.0:8080/oauth/callback")
     print("🔄 Using streamable-http transport")
+
+    if is_docker:
+        print("🐳 Docker environment detected")
 
     # Run the MCP server using the SDK's built-in transport
     mcp.run(transport="streamable-http")
@@ -489,16 +511,17 @@ def main():
     print("=== Slack MCP Server (MCP SDK) ===")
     print("🚀 Starting Slack MCP server...")
     print("📝 OAuth authentication will start automatically when tools are used")
-    print("🌐 All endpoints on port 8000")
+    print("🌐 All endpoints on port 8080")
 
     try:
         # Run server
         run_server()
     finally:
-        # Cleanup
-        print("🔄 Slack MCP Server shutting down...")
-        token_verifier.cleanup()
-        print("✅ Cleanup completed")
+        # Cleanup only if token_verifier was initialized
+        if token_verifier is not None:
+            print("🔄 Slack MCP Server shutting down...")
+            token_verifier.cleanup()
+            print("✅ Cleanup completed")
 
 
 if __name__ == "__main__":

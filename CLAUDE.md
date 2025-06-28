@@ -33,7 +33,7 @@ uv run python server.py
 uv run mcp run uv --directory /path/to/study-slack-remote-mcp run python server.py
 ```
 
-**AWS Fargate Deployment:**
+**AWS App Runner Deployment:**
 ```bash
 # One-command deployment with CDK
 cd infrastructure && ./deploy.sh
@@ -101,7 +101,7 @@ SLACK_CLIENT_SECRET=<your-slack-app-client-secret>
 # OAuth callbacks now use MCP server port (8000)
 ```
 
-### AWS Fargate Deployment
+### AWS App Runner Deployment
 
 Configuration is managed via AWS Parameter Store:
 ```bash
@@ -114,7 +114,7 @@ aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-client
 
 - OAuth scopes: `chat:write`, `channels:read`
 - Redirect URL (Local): `http://localhost:8000/oauth/callback`
-- Redirect URL (Cloud): `http://your-alb-domain.com/oauth/callback`
+- Redirect URL (Cloud): `https://your-app-runner-url.awsapprunner.com/oauth/callback`
 
 ## Important Development Guidelines
 
@@ -125,9 +125,9 @@ aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-client
    
 2. **OAuth Callback**: 
    - Local: `http://localhost:8000/oauth/callback`
-   - Cloud: Uses ALB domain with `/oauth/callback` path
+   - Cloud: Uses App Runner domain with `/oauth/callback` path
 
-3. **Infrastructure as Code**: Use CDK for all AWS deployments. Manual resource creation is discouraged. The `infrastructure/` directory contains all AWS resources defined as code.
+3. **Infrastructure as Code**: Use CDK for all AWS deployments. Manual resource creation is discouraged. The `infrastructure/` directory contains all AWS resources defined as code. Now using AWS App Runner for simplified deployment without long consistency checks.
 
 4. **Environment Management**: Use environment-specific configurations (dev/staging/prod) through CDK context parameters and Parameter Store paths.
 

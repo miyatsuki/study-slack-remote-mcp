@@ -1,6 +1,6 @@
 # Slack MCP Server - CDK Infrastructure
 
-This directory contains the AWS CDK (Cloud Development Kit) infrastructure code for deploying the Slack MCP Server to AWS Fargate.
+This directory contains the AWS CDK (Cloud Development Kit) infrastructure code for deploying the Slack MCP Server to AWS App Runner.
 
 ## 📁 File Structure
 
@@ -20,11 +20,10 @@ infrastructure/
 ## 🏗️ Infrastructure Components
 
 ### Core Resources
-- **ECS Cluster**: Fargate cluster for running containers
-- **ECS Service**: Manages desired number of tasks
-- **Task Definition**: Container specification with resource limits
-- **Application Load Balancer**: Internet-facing load balancer
-- **Target Group**: Health check and traffic routing
+- **App Runner Service**: Fully managed service for containerized applications
+- **Auto-scaling**: Built-in auto-scaling based on traffic
+- **Load Balancing**: Integrated load balancing (no ALB needed)
+- **HTTPS**: Automatic SSL/TLS with AWS-managed certificates
 
 ### Storage & Configuration  
 - **DynamoDB Table**: Token storage with TTL
@@ -33,9 +32,8 @@ infrastructure/
 - **CloudWatch Logs**: Centralized logging
 
 ### Security
-- **Security Groups**: Network access control
-- **IAM Roles**: Task execution and runtime permissions
-- **VPC**: Network isolation (new or existing)
+- **IAM Roles**: Instance and access roles for App Runner
+- **Built-in Security**: App Runner handles network security
 
 ## 🚀 Quick Deployment
 
@@ -45,6 +43,9 @@ infrastructure/
 
 # Deploy to specific environment
 ./deploy.sh prod 123456789012 ap-northeast-1
+
+# Deploy with specific environment
+./deploy.sh prod
 ```
 
 ## ⚙️ Configuration
@@ -57,66 +58,42 @@ The stack supports multiple environments through CDK context:
 cdk deploy SlackMcpStack-{env} --context env={env}
 ```
 
-### VPC Configuration
-
-**Option 1: Use existing VPC**
-```bash
-cdk deploy --context vpc_id=vpc-12345678
-```
-
-**Option 2: Create new VPC** (default)
-- 2 AZs with public and private subnets
-- NAT Gateway for private subnet egress
-
 ### Parameter Store Structure
 
 ```
 /slack-mcp/{env}/
 ├── client-id          # Slack app client ID
 ├── client-secret      # Slack app client secret (SecureString)
-├── service-base-url   # Service base URL for OAuth callbacks
-└── certificate-arn    # SSL certificate ARN (optional)
+└── service-base-url   # Service base URL for OAuth callbacks
 ```
 
 ## 🔐 HTTPS Configuration
 
-The stack supports HTTPS with flexible certificate options:
+App Runner provides automatic HTTPS with AWS-managed certificates:
 
-### Option 1: Self-Signed Certificate (Development)
+### Default HTTPS (Recommended for most cases)
 
 ```bash
-# Generate and import self-signed certificate
-./generate-self-signed-cert.sh
+# Deploy with automatic HTTPS
+./deploy.sh dev
+# Service URL: https://[random-id].awsapprunner.com
+```
 
-# Deploy with certificate ARN
+### Custom Domain (Optional)
+
+```bash
+# Deploy with certificate for custom domain
 export CERTIFICATE_ARN="arn:aws:acm:region:account:certificate/xxx"
-cdk deploy SlackMcpStack-dev
+./deploy.sh dev
 
-# Or use CDK context
-cdk deploy SlackMcpStack-dev --context certificateArn="arn:aws:acm:..."
+# After deployment, configure custom domain in App Runner console
 ```
 
-### Option 2: ACM Domain Certificate (Production)
-
-```bash
-# Deploy with your domain (requires DNS validation)
-export DOMAIN_NAME="your-domain.com"
-cdk deploy SlackMcpStack-dev
-
-# Or use CDK context
-cdk deploy SlackMcpStack-dev --context domainName="your-domain.com"
-```
-
-### Option 3: HTTP Only (Default)
-
-If no certificate is configured, the stack deploys with HTTP-only access.
-
-**HTTPS Benefits:**
-- ✅ Secure OAuth callback URLs
-- ✅ Encrypted communication
-- ✅ Compatible with Slack App requirements
-
-**Note**: Self-signed certificates will show browser warnings. For production, use a real domain with ACM.
+**App Runner Benefits:**
+- ✅ Automatic HTTPS by default
+- ✅ No load balancer management
+- ✅ Fast deployments (minutes vs hours)
+- ✅ Built-in auto-scaling
 
 ## 🔧 Manual Operations
 
@@ -129,17 +106,22 @@ aws cloudformation describe-stacks \
 
 ### Update Service with New Image
 ```bash
-aws ecs update-service \
-    --cluster slack-mcp-cluster-dev \
-    --service slack-mcp-service-dev \
-    --force-new-deployment
+# App Runner automatically detects new images if auto-deployment is enabled
+# Or manually start deployment:
+aws apprunner start-deployment \
+    --service-arn $(aws cloudformation describe-stacks \
+        --stack-name SlackMcpStack-dev \
+        --query 'Stacks[0].Outputs[?OutputKey==`AppRunnerServiceArn`].OutputValue' \
+        --output text)
 ```
 
 ### Check Service Status
 ```bash
-aws ecs describe-services \
-    --cluster slack-mcp-cluster-dev \
-    --services slack-mcp-service-dev
+aws apprunner describe-service \
+    --service-arn $(aws cloudformation describe-stacks \
+        --stack-name SlackMcpStack-dev \
+        --query 'Stacks[0].Outputs[?OutputKey==`AppRunnerServiceArn`].OutputValue' \
+        --output text)
 ```
 
 ## 🛠️ Development
@@ -156,7 +138,7 @@ cdk diff SlackMcpStack-dev
 # Synthesize CloudFormation
 cdk synth SlackMcpStack-dev
 
-# Deploy with approval
+# Deploy without approval
 cdk deploy SlackMcpStack-dev --require-approval=never
 ```
 
@@ -196,17 +178,28 @@ cdk destroy SlackMcpStack-dev SlackMcpStack-staging SlackMcpStack-prod
 1. **Bootstrap required**: Run `cdk bootstrap` first
 2. **Permission denied**: Check AWS credentials and IAM permissions
 3. **Resource conflicts**: Use unique stack names per environment
-4. **VPC not found**: Ensure VPC ID exists in the target region
+4. **ECR image not found**: Ensure image is pushed to ECR repository
 
 ### Logs and Monitoring
 
 ```bash
-# View ECS service events
-aws ecs describe-services \
-    --cluster slack-mcp-cluster-dev \
-    --services slack-mcp-service-dev \
-    --query 'services[0].events'
+# View App Runner service logs
+aws logs tail /aws/apprunner/slack-mcp-server-dev/[service-id]/application --follow
 
-# View CloudWatch logs
-aws logs tail /ecs/slack-mcp-server-dev --follow
+# View service events
+aws apprunner list-operations \
+    --service-arn $(aws cloudformation describe-stacks \
+        --stack-name SlackMcpStack-dev \
+        --query 'Stacks[0].Outputs[?OutputKey==`AppRunnerServiceArn`].OutputValue' \
+        --output text)
 ```
+
+## 🔄 Migration from ECS/Fargate
+
+If migrating from ECS/Fargate to App Runner:
+
+1. App Runner replaces ECS cluster, service, task definition, and ALB
+2. Security groups and VPC configuration are handled automatically
+3. Health checks are simplified (just specify path)
+4. HTTPS is automatic without certificate management
+5. Deployment is much faster with no consistency check delays

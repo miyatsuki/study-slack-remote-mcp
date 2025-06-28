@@ -1,8 +1,10 @@
 """トークン検証の実装（セッション対応版）"""
 
+import os
 from typing import Optional
 
-from parameter_store import get_parameter_store_client
+from dotenv import load_dotenv
+
 from session_manager import SessionTokenManager
 from slack_auth_provider import SlackAuthProvider
 
@@ -29,16 +31,15 @@ class SlackTokenVerifier:
     """Slackのトークン検証を行うクラス（セッション対応版）"""
 
     def __init__(self):
-        # Parameter Store または環境変数からSlackアプリのクレデンシャルを取得
-        parameter_store = get_parameter_store_client()
-        slack_config = parameter_store.get_slack_config()
+        # 環境変数からSlackアプリのクレデンシャルを取得
 
-        client_id = slack_config["client_id"]
-        client_secret = slack_config["client_secret"]
+        load_dotenv()
+        client_id = os.getenv("SLACK_CLIENT_ID")
+        client_secret = os.getenv("SLACK_CLIENT_SECRET")
 
         if not client_id or not client_secret:
             raise RuntimeError(
-                "Slack Client IDまたはClient Secretが設定されていません。Parameter Store または環境変数を確認してください。"
+                "Slack Client IDまたはClient Secretが設定されていません。環境変数を確認してください。"
             )
 
         # セッション管理とSlack認証プロバイダーを初期化

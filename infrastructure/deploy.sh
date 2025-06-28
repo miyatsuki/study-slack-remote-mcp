@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Slack MCP Server Main Infrastructure Deployment Script
+# Slack MCP Server Main Infrastructure Deployment Script - App Runner Version
 # Prerequisites must be deployed first using deploy-prerequisites.sh
 
 set -e
@@ -10,10 +10,11 @@ ENV_NAME=${1:-dev}
 AWS_ACCOUNT=${2:-$(aws sts get-caller-identity --query Account --output text)}
 AWS_REGION=${3:-ap-northeast-1}
 
-echo "🚀 Deploying Slack MCP Server Main Infrastructure"
+echo "🚀 Deploying Slack MCP Server Main Infrastructure (App Runner)"
 echo "   Environment: $ENV_NAME"
 echo "   Account: $AWS_ACCOUNT"
 echo "   Region: $AWS_REGION"
+echo "   🔒 HTTPS: Automatic with App Runner (*.awsapprunner.com)"
 echo ""
 
 # Check prerequisites
@@ -73,17 +74,8 @@ echo "✅ Docker image found in ECR"
 echo "🔍 Checking for existing main stack..."
 if aws cloudformation describe-stacks --stack-name SlackMcpStack-$ENV_NAME --region $AWS_REGION >/dev/null 2>&1; then
     echo "⚠️  Main stack 'SlackMcpStack-$ENV_NAME' already exists"
-    echo "🗑️  Deleting existing main stack..."
-    aws cloudformation delete-stack --stack-name SlackMcpStack-$ENV_NAME --region $AWS_REGION
-    
-    echo "⏳ Waiting for stack deletion to complete..."
-    aws cloudformation wait stack-delete-complete --stack-name SlackMcpStack-$ENV_NAME --region $AWS_REGION
-    if [ $? -eq 0 ]; then
-        echo "✅ Main stack deleted successfully"
-    else
-        echo "❌ Failed to delete main stack"
-        exit 1
-    fi
+    echo "📝 Note: App Runner updates are handled through the service, not stack recreation"
+    echo "   The stack will be updated with new configuration"
 fi
 
 # Clean up existing DynamoDB table if it exists
@@ -132,20 +124,32 @@ fi
 # Get outputs
 echo ""
 echo "📋 Infrastructure deployment completed!"
-ALB_DNS=$(aws cloudformation describe-stacks \
+APP_RUNNER_URL=$(aws cloudformation describe-stacks \
     --stack-name SlackMcpStack-$ENV_NAME \
     --region $AWS_REGION \
-    --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDNS`].OutputValue' \
+    --query 'Stacks[0].Outputs[?OutputKey==`AppRunnerServiceUrl`].OutputValue' \
     --output text)
 
-echo "🌐 Load Balancer DNS: $ALB_DNS"
+APP_RUNNER_ARN=$(aws cloudformation describe-stacks \
+    --stack-name SlackMcpStack-$ENV_NAME \
+    --region $AWS_REGION \
+    --query 'Stacks[0].Outputs[?OutputKey==`AppRunnerServiceArn`].OutputValue' \
+    --output text)
 
-# Update service base URL parameter with ALB DNS
+echo "🌐 App Runner Service URL: $APP_RUNNER_URL"
+echo "🔗 App Runner Service ARN: $APP_RUNNER_ARN"
+
+# App Runner always provides HTTPS
+PROTOCOL="https"
+
+# Update service base URL parameter with App Runner URL
 echo ""
 echo "🔄 Updating service base URL parameter..."
+# Remove the https:// prefix that's already included in the output
+SERVICE_URL=$(echo $APP_RUNNER_URL | sed 's|https://||')
 aws ssm put-parameter \
     --name "/slack-mcp/$ENV_NAME/service-base-url" \
-    --value "http://$ALB_DNS" \
+    --value "https://$SERVICE_URL" \
     --type "String" \
     --overwrite \
     --region $AWS_REGION
@@ -159,11 +163,17 @@ fi
 echo ""
 echo "📝 Next steps:"
 echo "   1. Update your Slack app redirect URL to:"
-echo "      http://$ALB_DNS/oauth/callback"
+echo "      $APP_RUNNER_URL/oauth/callback"
 echo ""
 echo "   2. Test the deployment:"
-echo "      curl http://$ALB_DNS/health"
+echo "      curl $APP_RUNNER_URL/health"
 echo ""
 echo "   3. If you need to update Slack credentials:"
 echo "      aws ssm put-parameter --name '/slack-mcp/$ENV_NAME/client-id' --value 'your-client-id' --type 'String' --overwrite"
 echo "      aws ssm put-parameter --name '/slack-mcp/$ENV_NAME/client-secret' --value 'your-client-secret' --type 'SecureString' --overwrite"
+echo ""
+echo "   4. To configure custom domain (optional):"
+echo "      - Go to App Runner console"
+echo "      - Select your service: slack-mcp-server-$ENV_NAME"
+echo "      - Click 'Custom domains' tab"
+echo "      - Add your domain and follow DNS configuration steps"

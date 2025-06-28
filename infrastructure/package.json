@@ -33,7 +33,7 @@
     "cdk",
     "slack",
     "mcp",
-    "fargate",
+    "apprunner",
     "infrastructure"
   ],
   "author": "",

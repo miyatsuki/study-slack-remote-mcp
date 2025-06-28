@@ -9,7 +9,7 @@ A Model Context Protocol (MCP) server that enables LLMs to interact with Slack w
 - 💾 **Token Persistence**: Tokens are saved locally for seamless reconnection
 - 📱 **Slack Integration**: Post messages and list channels in Slack workspaces
 - 🔄 **Session Management**: Automatic session handling with isolation
-- ☁️ **Cloud-ready**: Supports deployment to AWS Fargate with CDK
+- ☁️ **Cloud-ready**: Supports deployment to AWS App Runner with CDK
 
 ## Prerequisites
 
@@ -152,9 +152,9 @@ async with httpx.AsyncClient() as client:
 The server uses a single port:
 - **8000**: MCP server endpoint (includes health check and OAuth callback routes)
 
-### AWS Fargate Deployment
+### AWS App Runner Deployment
 
-The project includes AWS CDK infrastructure for production deployment:
+The project includes AWS CDK infrastructure for production deployment using App Runner for faster, simpler deployments:
 
 ```bash
 # Deploy to AWS
@@ -165,6 +165,11 @@ cd infrastructure
 aws ssm put-parameter --name "/slack-mcp/dev/client-id" --value "your-client-id" --type "String"
 aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-secret" --type "SecureString"
 ```
+
+App Runner provides:
+- Built-in HTTPS with automatic certificates
+- Fast deployment without long consistency checks
+- Auto-scaling and simplified management
 
 ## Project Structure
 
@@ -177,7 +182,6 @@ slack-mcp-server/
 ├── token_storage.py        # Token persistence layer
 ├── storage_interface.py    # Storage abstraction (local/cloud)
 ├── storage_dynamodb.py     # DynamoDB storage for AWS
-├── parameter_store.py      # AWS Systems Manager integration
 ├── infrastructure/         # AWS CDK deployment code
 ├── test_fastmcp_client.py  # Test client for development
 └── .env                    # Environment variables
