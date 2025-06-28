@@ -3,7 +3,7 @@ runtime: python311
 build:
   commands:
     build:
-      - pip install -e .
+      - pip install .
 run:
   runtime-version: 3.11
   command: python server.py
