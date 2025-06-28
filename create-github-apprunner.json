@@ -1,0 +1,29 @@
+{
+  "ServiceName": "slack-mcp-github-dev",
+  "SourceConfiguration": {
+    "CodeRepository": {
+      "RepositoryUrl": "https://github.com/miyatsuki/study-slack-remote-mcp",
+      "SourceCodeVersion": {
+        "Type": "BRANCH",
+        "Value": "main"
+      },
+      "CodeConfiguration": {
+        "ConfigurationSource": "REPOSITORY"
+      }
+    },
+    "AutoDeploymentsEnabled": true,
+    "AuthenticationConfiguration": {
+      "ConnectionArn": "arn:aws:apprunner:ap-northeast-1:085875035608:connection/gh-connection/b1c7ae218ff843ddaeb34ac4c66b35f8"
+    }
+  },
+  "InstanceConfiguration": {
+    "Cpu": "0.25 vCPU",
+    "Memory": "0.5 GB"
+  },
+  "Tags": [
+    {
+      "Key": "Environment",
+      "Value": "dev"
+    }
+  ]
+}

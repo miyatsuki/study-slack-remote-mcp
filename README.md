@@ -26,8 +26,8 @@ A Model Context Protocol (MCP) server that enables LLMs to interact with Slack w
    - `chat:write` - Post messages
    - `channels:read` - List channels
 3. Add Redirect URLs:
-   - Local: `http://localhost:8000/oauth/callback`
-   - Production: `https://your-domain.com/oauth/callback`
+   - Local: `http://localhost:8080/slack/callback`
+   - Production: `https://your-domain.com/slack/callback`
 4. Copy the Client ID and Client Secret
 
 ### 2. Installation

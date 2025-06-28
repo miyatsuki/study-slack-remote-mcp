@@ -1,146 +1,128 @@
 """Slack MCP Server - Using MCP SDK"""
 
-import asyncio
+import json
+import logging
 import os
-from typing import Dict, Optional
+import time
 
 import httpx
 from dotenv import load_dotenv
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+from slack_oauth_provider import SlackOAuthProvider
 from storage_interface import is_cloud_environment
-from token_verifier import SlackTokenVerifier
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+# Custom logging filter to exclude health check requests
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Exclude health check endpoint logs
+        return '/health' not in record.getMessage()
+
+
+# Middleware to fix VSCode registration requests
+class VSCodeRegistrationFixMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/register" and request.method == "POST":
+            # Clone the request body
+            body = await request.body()
+            
+            try:
+                # Parse the JSON body
+                data = json.loads(body.decode('utf-8'))
+                
+                # Check if this is a VSCode request with device_code grant type
+                if "grant_types" in data and "urn:ietf:params:oauth:grant-type:device_code" in data["grant_types"]:
+                    print(f"Fixing VSCode registration request by removing device_code grant type")
+                    
+                    # Remove the unsupported device_code grant type
+                    data["grant_types"] = [gt for gt in data["grant_types"] if gt in ["authorization_code", "refresh_token"]]
+                    
+                    # Convert back to JSON
+                    fixed_body = json.dumps(data).encode('utf-8')
+                    
+                    # Update the request with the fixed body
+                    request._body = fixed_body
+                    
+                    # Update Content-Length header
+                    headers = dict(request.headers)
+                    headers['content-length'] = str(len(fixed_body))
+                    request._headers = [(k.encode('latin-1'), v.encode('latin-1')) for k, v in headers.items()]
+                else:
+                    # Not a VSCode request, use original body
+                    request._body = body
+            except Exception as e:
+                print(f"Error processing registration request: {e}")
+                # On error, use original body
+                request._body = body
+        
+        response = await call_next(request)
+        return response
 
 # Load environment variables
 load_dotenv()
 
+# Initialize Slack OAuth provider
+slack_oauth_provider = SlackOAuthProvider()
+
+# Configure auth settings for MCP
+auth_settings = AuthSettings(
+    required_scopes=["chat:write", "channels:read"],
+    issuer_url=os.getenv("SERVICE_BASE_URL", "http://localhost:8080"),
+    service_documentation_url="https://github.com/miyatsuki/study-slack-remote-mcp",
+    client_registration_options=ClientRegistrationOptions(
+        enabled=True,
+        valid_scopes=["chat:write", "channels:read"],
+        default_scopes=["chat:write", "channels:read"]
+    )
+)
+
 # Create MCP server instance using official MCP SDK's FastMCP
 # Bind to 0.0.0.0:8080 to allow external access
-mcp = FastMCP("slack-mcp-server", host="0.0.0.0", port=8080)
+mcp = FastMCP(
+    "slack-mcp-server",
+    auth_server_provider=slack_oauth_provider,
+    host="0.0.0.0",
+    port=8080,
+    auth=auth_settings,
+)
 
-# Token verifier instance - lazy initialization to speed up startup
-token_verifier = None
+# Patch the streamable_http_app method to add VSCode fix middleware
+original_streamable_http_app = mcp.streamable_http_app
 
-# Track OAuth initiation per session
-oauth_initiated_sessions: Dict[str, bool] = {}
+def patched_streamable_http_app():
+    app = original_streamable_http_app()
+    # Add VSCode fix middleware as the first middleware (processes requests first)
+    app.add_middleware(VSCodeRegistrationFixMiddleware)
+    return app
 
-# Note: MCP SDK's FastMCP doesn't provide direct access to HTTP headers
-# This is a limitation compared to the third-party fastmcp package
-# For multi-user support, we'll need to use the session ID mechanism
-
-
-def get_user_identifier() -> str:
-    """Get a unique user identifier.
-
-    Note: The MCP SDK's FastMCP doesn't provide access to HTTP headers,
-    so we cannot implement header-based user identification as before.
-    This is a known limitation when using the official SDK.
-    """
-    # TODO: Implement proper session-based user identification
-    # For now, default to single user mode
-    return "default_user"
-
-
-async def get_session_slack_token() -> Optional[str]:
-    """Get Slack token for current session (initiates OAuth on first call)"""
-    global token_verifier
-
-    # Lazy initialize token verifier on first use
-    if token_verifier is None:
-        token_verifier = SlackTokenVerifier()
-
-    # Get unique user identifier
-    user_id = get_user_identifier()
-    print(f"🔍 User identifier: {user_id}")
-
-    # Create a user-specific storage key
-    storage_key = f"{token_verifier.auth_provider.client_id}:{user_id}"
-
-    # First, check if we have a saved token for this user
-    persisted_token = token_verifier.auth_provider.token_storage.load_token(storage_key)
-
-    if persisted_token:
-        # Validate the token
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://slack.com/api/auth.test",
-                    headers={"Authorization": f"Bearer {persisted_token}"},
-                )
-                data = response.json()
-                if data.get("ok", False):
-                    print(f"✅ Using existing valid Slack token for user {user_id}")
-                    return persisted_token
-                else:
-                    print(
-                        f"⚠️ Token validation failed for user {user_id}: {data.get('error', 'unknown')}"
-                    )
-        except Exception as e:
-            print(f"⚠️ Token validation error for user {user_id}: {e}")
-
-    # No valid token found for this user, start OAuth
-    session_id = f"session_{user_id}"
-
-    if session_id not in oauth_initiated_sessions:
-        oauth_initiated_sessions[session_id] = True
-        print(
-            f"🔐 No valid token found for user {user_id}. Starting OAuth authentication..."
-        )
-
-        # Create client info with user ID
-        client_info = {
-            "name": "mcp_client",
-            "version": "1.0.0",
-            "session_id": session_id,
-            "user_id": user_id,
-        }
-
-        # Start OAuth flow
-        auth_session_id = await token_verifier.start_session_auth(client_info)
-        print(
-            f"✅ OAuth process started for user {user_id} (session {auth_session_id[:8]}...)"
-        )
-
-        # Wait for user to complete OAuth
-        print("⏳ Waiting for OAuth completion...")
-        for i in range(30):  # Wait up to 30 seconds
-            await asyncio.sleep(1)
-            # Check if we now have a token
-            token = await token_verifier.get_session_token(auth_session_id)
-            if token:
-                # Save token with user-specific key
-                token_verifier.auth_provider.token_storage.save_token(
-                    storage_key, token, expires_in_seconds=365 * 24 * 60 * 60
-                )
-                print(f"✅ OAuth completed successfully for user {user_id}!")
-                return token
-
-        print(
-            f"❌ OAuth timeout for user {user_id} - please complete authentication and try again"
-        )
-        return None
-
-    # OAuth already initiated for this user, check if we have a token now
-    return await token_verifier.get_session_token(session_id)
+mcp.streamable_http_app = patched_streamable_http_app
 
 
 @mcp.tool()
-async def list_channels(user_id: Optional[str] = None) -> dict:
+async def list_channels() -> dict:
     """Slackワークスペース内のチャンネル一覧を取得
-
-    Args:
-        user_id: ユーザーID（オプション）
 
     Returns:
         チャンネル名とIDのディクショナリ、またはエラー情報
     """
-    slack_token = await get_session_slack_token()
+    # Get context and auth info
+    context = mcp.get_context()
+
+    # Check if user is authenticated
+    if not hasattr(context, "auth") or not context.auth:
+        return {"error": "認証が必要です。まずOAuth認証を完了してください。"}
+
+    # Get Slack token from MCP token
+    mcp_token = context.auth.access_token
+    slack_token = await slack_oauth_provider.get_slack_token_for_mcp_token(mcp_token)
+
     if not slack_token:
-        return {
-            "error": "Slackアクセストークンが取得できません。認証を完了してください。"
-        }
+        return {"error": "Slackトークンが見つかりません。再度認証してください。"}
 
     headers = {"Authorization": f"Bearer {slack_token}"}
     url = "https://slack.com/api/conversations.list"
@@ -164,15 +146,12 @@ async def list_channels(user_id: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-async def post_message(
-    channel_id: str, text: str, user_id: Optional[str] = None
-) -> str:
+async def post_message(channel_id: str, text: str) -> str:
     """指定したチャンネルにメッセージを投稿
 
     Args:
         channel_id: チャンネルID
         text: メッセージテキスト
-        user_id: ユーザーID（オプション）
 
     Returns:
         成功/失敗のメッセージ
@@ -180,9 +159,19 @@ async def post_message(
     if not channel_id or not text:
         return "❌ channel_idとtextが必要です"
 
-    slack_token = await get_session_slack_token()
+    # Get context and auth info
+    context = mcp.get_context()
+
+    # Check if user is authenticated
+    if not hasattr(context, "auth") or not context.auth:
+        return "❌ 認証が必要です。まずOAuth認証を完了してください。"
+
+    # Get Slack token from MCP token
+    mcp_token = context.auth.access_token
+    slack_token = await slack_oauth_provider.get_slack_token_for_mcp_token(mcp_token)
+
     if not slack_token:
-        return "❌ Slackアクセストークンが取得できません。認証を完了してください。"
+        return "❌ Slackトークンが見つかりません。再度認証してください。"
 
     headers = {
         "Authorization": f"Bearer {slack_token}",
@@ -212,68 +201,72 @@ async def get_auth_status() -> dict:
     Returns:
         認証状態とセッション情報のディクショナリ
     """
-    global token_verifier
+    # Get context and auth info
+    context = mcp.get_context()
 
-    # Lazy initialize token verifier on first use
-    if token_verifier is None:
-        token_verifier = SlackTokenVerifier()
+    # Check if user is authenticated
+    is_authenticated = hasattr(context, "auth") and context.auth is not None
 
-    # Get user identifier
-    user_id = get_user_identifier()
-
-    # Check if we have a valid token for this user
-    storage_key = f"{token_verifier.auth_provider.client_id}:{user_id}"
-    user_token = token_verifier.auth_provider.token_storage.load_token(storage_key)
-    has_token = bool(user_token)
-
-    # Get all persisted tokens info
-    all_tokens = token_verifier.auth_provider.token_storage.list_tokens()
-
-    # Filter tokens for current app
-    app_tokens = [
-        t
-        for t in all_tokens
-        if t["client_id"].startswith(token_verifier.auth_provider.client_id[:8])
-    ]
-
-    # Get all sessions from token verifier
-    all_sessions = token_verifier.list_sessions()
-
-    return {
-        "user_id": user_id,
-        "has_valid_token": has_token,
-        "app_tokens_count": len(app_tokens),
-        "all_tokens_count": len(all_tokens),
-        "all_sessions": all_sessions,
-        "oauth_initiated_for_user": f"session_{user_id}" in oauth_initiated_sessions,
-        "client_id": token_verifier.auth_provider.client_id[:8] + "...",
+    result = {
+        "authenticated": is_authenticated,
+        "environment": "cloud" if is_cloud_environment() else "local",
     }
+
+    if is_authenticated and context.auth:
+        # Get Slack token info
+        mcp_token = context.auth.access_token
+        slack_token = await slack_oauth_provider.get_slack_token_for_mcp_token(
+            mcp_token
+        )
+
+        result.update(
+            {
+                "has_slack_token": bool(slack_token),
+                "client_id": slack_oauth_provider.client_id[:8] + "...",
+                "scopes": (
+                    context.auth.scopes if hasattr(context.auth, "scopes") else []
+                ),
+            }
+        )
+
+    return result
 
 
 # Resource for session information
 @mcp.resource("session://info")
 async def get_session_info() -> dict:
     """Get current session information"""
-    global token_verifier
+    # Get context and auth info
+    context = mcp.get_context()
 
-    # Lazy initialize token verifier on first use
-    if token_verifier is None:
-        token_verifier = SlackTokenVerifier()
+    # Check if user is authenticated
+    is_authenticated = hasattr(context, "auth") and context.auth is not None
 
-    # Get user identifier
-    user_id = get_user_identifier()
-
-    # Check authentication status for this user
-    storage_key = f"{token_verifier.auth_provider.client_id}:{user_id}"
-    user_token = token_verifier.auth_provider.token_storage.load_token(storage_key)
-
-    return {
-        "user_id": user_id,
-        "session_id": f"session_{user_id}",
-        "authenticated": bool(user_token),
+    result = {
+        "authenticated": is_authenticated,
         "environment": "cloud" if is_cloud_environment() else "local",
-        "client_id": token_verifier.auth_provider.client_id[:8] + "...",
     }
+
+    if is_authenticated and context.auth:
+        # Get Slack token info
+        mcp_token = context.auth.access_token
+        slack_token = await slack_oauth_provider.get_slack_token_for_mcp_token(
+            mcp_token
+        )
+
+        result.update(
+            {
+                "has_slack_token": bool(slack_token),
+                "client_id": slack_oauth_provider.client_id[:8] + "...",
+                "session_id": (
+                    context.session.session_id
+                    if hasattr(context.session, "session_id")
+                    else None
+                ),
+            }
+        )
+
+    return result
 
 
 # Custom route: Health check endpoint
@@ -290,118 +283,17 @@ async def health_check(request: Request) -> JSONResponse:
     )
 
 
-# Custom route: OAuth callback endpoint
-@mcp.custom_route("/oauth/callback", methods=["GET"])
-async def oauth_callback(request: Request) -> HTMLResponse:
-    """OAuth callback endpoint for Slack authentication"""
-    query_params = dict(request.query_params)
 
-    if "code" in query_params:
-        # Handle OAuth success
-        code = query_params["code"]
-        state = query_params.get("state", "")
 
-        try:
-            # Exchange code for token
-            token_data = await exchange_oauth_code(code)
+# Custom route: Slack OAuth callback endpoint
+@mcp.custom_route("/slack/callback", methods=["GET"])
+async def slack_oauth_callback(request: Request) -> HTMLResponse:
+    """Handle Slack OAuth callback after user authorization"""
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
 
-            if token_data and token_data.get("ok"):
-                access_token = token_data.get("access_token")
-
-                # Extract session_id from state if available
-                session_id = state if state else "default_session"
-
-                # For single-user mode, we'll use the default user
-                user_id = get_user_identifier()
-                storage_key = f"{token_verifier.auth_provider.client_id}:{user_id}"
-
-                # Save token
-                token_verifier.auth_provider.token_storage.save_token(
-                    storage_key, access_token, expires_in_seconds=365 * 24 * 60 * 60
-                )
-
-                # Update session if we have one
-                if session_id in oauth_initiated_sessions:
-                    # Mark session as completed
-                    oauth_initiated_sessions[session_id] = True
-
-                return HTMLResponse(
-                    """
-                    <html>
-                    <head>
-                        <title>認証完了 - Slack MCP</title>
-                        <style>
-                            body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-                            h1 { color: #2ea664; }
-                            .message { background: #f8f8f8; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                            .footer { color: #666; font-size: 14px; margin-top: 30px; }
-                        </style>
-                    </head>
-                    <body>
-                        <h1>✅ Slack認証が完了しました</h1>
-                        <div class="message">
-                            <p>トークンが正常に保存されました。</p>
-                            <p>MCPクライアントに戻ってツールを実行してください。</p>
-                        </div>
-                        <div class="footer">
-                            <p>このウィンドウは閉じても問題ありません。</p>
-                        </div>
-                    </body>
-                    </html>
-                    """
-                )
-
-            # Token exchange failed
-            return HTMLResponse(
-                """
-                <html>
-                <head>
-                    <title>認証エラー - Slack MCP</title>
-                    <style>
-                        body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-                        h1 { color: #e01e5a; }
-                        .error { background: #fee; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                    </style>
-                </head>
-                <body>
-                    <h1>❌ トークン取得に失敗しました</h1>
-                    <div class="error">
-                        <p>Slackからのトークン取得に失敗しました。</p>
-                        <p>もう一度認証をやり直してください。</p>
-                    </div>
-                </body>
-                </html>
-                """
-            )
-
-        except Exception as e:
-            print(f"OAuth callback error: {e}")
-            return HTMLResponse(
-                f"""
-                <html>
-                <head>
-                    <title>認証エラー - Slack MCP</title>
-                    <style>
-                        body {{ font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
-                        h1 {{ color: #e01e5a; }}
-                        .error {{ background: #fee; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-                        pre {{ background: #f4f4f4; padding: 10px; overflow: auto; }}
-                    </style>
-                </head>
-                <body>
-                    <h1>❌ 認証処理でエラーが発生しました</h1>
-                    <div class="error">
-                        <p>エラーの詳細:</p>
-                        <pre>{str(e)}</pre>
-                    </div>
-                </body>
-                </html>
-                """
-            )
-
-    elif "error" in query_params:
-        # Handle OAuth error
-        error = query_params["error"]
+    if error:
         return HTMLResponse(
             f"""
             <html>
@@ -416,7 +308,7 @@ async def oauth_callback(request: Request) -> HTMLResponse:
             <body>
                 <h1>❌ Slack認証でエラーが発生しました</h1>
                 <div class="error">
-                    <p>Slackからエラーが返されました: <strong>{error}</strong></p>
+                    <p>エラー: <strong>{error}</strong></p>
                     <p>認証をやり直してください。</p>
                 </div>
             </body>
@@ -424,68 +316,93 @@ async def oauth_callback(request: Request) -> HTMLResponse:
             """
         )
 
-    # No code or error parameter
-    return HTMLResponse(
-        """
-        <html>
-        <head>
-            <title>認証エラー - Slack MCP</title>
-            <style>
-                body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-                h1 { color: #e01e5a; }
-                .error { background: #fee; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <h1>❌ 無効なリクエスト</h1>
-            <div class="error">
-                <p>認証コードが含まれていません。</p>
-                <p>Slack認証フローから正しくアクセスしてください。</p>
-            </div>
-        </body>
-        </html>
-        """
-    )
+    if not code or not state:
+        return HTMLResponse(
+            """
+            <html>
+            <head>
+                <title>認証エラー - Slack MCP</title>
+                <style>
+                    body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                    h1 { color: #e01e5a; }
+                    .error { background: #fee; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                </style>
+            </head>
+            <body>
+                <h1>❌ 無効なリクエスト</h1>
+                <div class="error">
+                    <p>必要なパラメータが不足しています。</p>
+                </div>
+            </body>
+            </html>
+            """
+        )
 
+    try:
+        # Handle the Slack callback in the OAuth provider
+        auth_code = await slack_oauth_provider.handle_slack_callback(code, state)
 
-async def exchange_oauth_code(code: str) -> Optional[Dict]:
-    """Exchange OAuth authorization code for access token"""
-    client_id = os.getenv("SLACK_CLIENT_ID")
-    client_secret = os.getenv("SLACK_CLIENT_SECRET")
+        # Get the redirect URI from the authorization code
+        redirect_uri = str(auth_code.redirect_uri)
 
-    if not client_id or not client_secret:
-        print("Missing Slack OAuth credentials")
-        return None
+        # Add our MCP authorization code to the redirect
+        if "?" in redirect_uri:
+            final_redirect = f"{redirect_uri}&code={auth_code.code}"
+        else:
+            final_redirect = f"{redirect_uri}?code={auth_code.code}"
 
-    # Build redirect URI based on environment
-    if is_cloud_environment():
-        # In cloud environment, get from environment variable (set by App Runner)
-        base_url = os.getenv("SERVICE_BASE_URL")
-        if not base_url:
-            print("Missing SERVICE_BASE_URL environment variable")
-            return None
-        redirect_uri = f"{base_url}/oauth/callback"
-    else:
-        # Local development - use MCP server port (8080)
-        redirect_uri = "http://localhost:8080/oauth/callback"
+        # Add state if it was provided
+        if auth_code.slack_state:
+            final_redirect += f"&state={auth_code.slack_state}"
 
-    token_url = "https://slack.com/api/oauth.v2.access"
+        # Redirect to the MCP client's callback URL
+        return HTMLResponse(
+            f"""
+            <html>
+            <head>
+                <title>認証完了 - Slack MCP</title>
+                <meta http-equiv="refresh" content="0; url={final_redirect}">
+                <style>
+                    body {{ font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
+                    h1 {{ color: #2ea664; }}
+                    .message {{ background: #f8f8f8; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                </style>
+            </head>
+            <body>
+                <h1>✅ Slack認証が完了しました</h1>
+                <div class="message">
+                    <p>MCPクライアントにリダイレクトしています...</p>
+                    <p>自動的にリダイレクトされない場合は、<a href="{final_redirect}">こちら</a>をクリックしてください。</p>
+                </div>
+            </body>
+            </html>
+            """
+        )
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                token_url,
-                data={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                },
-            )
-            return response.json()
-        except Exception as e:
-            print(f"Error exchanging OAuth code: {e}")
-            return None
+    except Exception as e:
+        print(f"Slack OAuth callback error: {e}")
+        return HTMLResponse(
+            f"""
+            <html>
+            <head>
+                <title>認証エラー - Slack MCP</title>
+                <style>
+                    body {{ font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
+                    h1 {{ color: #e01e5a; }}
+                    .error {{ background: #fee; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                    pre {{ background: #f4f4f4; padding: 10px; overflow: auto; }}
+                </style>
+            </head>
+            <body>
+                <h1>❌ 認証処理でエラーが発生しました</h1>
+                <div class="error">
+                    <p>エラーの詳細:</p>
+                    <pre>{str(e)}</pre>
+                </div>
+            </body>
+            </html>
+            """
+        )
 
 
 def run_server():
@@ -496,7 +413,7 @@ def run_server():
     # Run MCP server with HTTP transport
     print("📍 MCP endpoint: http://0.0.0.0:8080/mcp")
     print("💚 Health check: http://0.0.0.0:8080/health")
-    print("🔗 OAuth callback: http://0.0.0.0:8080/oauth/callback")
+    print("🔗 OAuth callback: http://0.0.0.0:8080/slack/callback")
     print("🔄 Using streamable-http transport")
 
     if is_docker:
@@ -512,16 +429,15 @@ def main():
     print("🚀 Starting Slack MCP server...")
     print("📝 OAuth authentication will start automatically when tools are used")
     print("🌐 All endpoints on port 8080")
+    
+    # Configure logging to filter out health check requests
+    # Get uvicorn access logger
+    uvicorn_logger = logging.getLogger("uvicorn.access")
+    health_filter = HealthCheckFilter()
+    uvicorn_logger.addFilter(health_filter)
 
-    try:
-        # Run server
-        run_server()
-    finally:
-        # Cleanup only if token_verifier was initialized
-        if token_verifier is not None:
-            print("🔄 Slack MCP Server shutting down...")
-            token_verifier.cleanup()
-            print("✅ Cleanup completed")
+    # Run server
+    run_server()
 
 
 if __name__ == "__main__":
