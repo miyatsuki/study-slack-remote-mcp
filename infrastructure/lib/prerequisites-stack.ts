@@ -1,11 +1,10 @@
 /**
- * Prerequisites Stack - Creates Parameter Store parameters and ECR repository
+ * Prerequisites Stack - Creates Parameter Store parameters
  * This should be deployed before the main Slack MCP stack
  */
 
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 
 export interface PrerequisitesStackProps extends cdk.StackProps {
@@ -14,7 +13,6 @@ export interface PrerequisitesStackProps extends cdk.StackProps {
 
 export class PrerequisitesStack extends cdk.Stack {
   private readonly envName: string;
-  public readonly ecrRepository: ecr.Repository;
   public readonly parameters: {
     clientId: ssm.StringParameter;
     clientSecret: ssm.StringParameter;
@@ -26,9 +24,6 @@ export class PrerequisitesStack extends cdk.Stack {
 
     this.envName = props.envName;
 
-    // Create ECR repository
-    this.ecrRepository = this.createEcrRepository();
-
     // Create Parameter Store parameters
     this.parameters = this.createParameterStoreParameters();
 
@@ -36,13 +31,6 @@ export class PrerequisitesStack extends cdk.Stack {
     this.createOutputs();
   }
 
-  private createEcrRepository(): ecr.Repository {
-    return new ecr.Repository(this, 'SlackMcpRepository', {
-      repositoryName: `slack-mcp-server-${this.envName}`,
-      removalPolicy: cdk.RemovalPolicy.RETAIN, // Keep repository for reuse
-      // Image scanning and lifecycle rules removed for faster deployment
-    });
-  }
 
   private createParameterStoreParameters(): {
     clientId: ssm.StringParameter;
@@ -73,22 +61,15 @@ export class PrerequisitesStack extends cdk.Stack {
   }
 
   private createOutputs(): void {
-    new cdk.CfnOutput(this, 'ECRRepositoryURI', {
-      value: this.ecrRepository.repositoryUri,
-      description: 'ECR repository URI for container images',
-      exportName: `SlackMcp-${this.envName}-ECRRepositoryURI`,
-    });
-
-    new cdk.CfnOutput(this, 'ECRRepositoryName', {
-      value: this.ecrRepository.repositoryName,
-      description: 'ECR repository name',
-      exportName: `SlackMcp-${this.envName}-ECRRepositoryName`,
-    });
-
     new cdk.CfnOutput(this, 'ParameterStorePrefix', {
       value: `/slack-mcp/${this.envName}/`,
       description: 'Parameter Store prefix for configuration',
       exportName: `SlackMcp-${this.envName}-ParameterStorePrefix`,
+    });
+
+    new cdk.CfnOutput(this, 'ParametersNote', {
+      value: 'Remember to update the parameter values with actual Slack app credentials',
+      description: 'Important note about parameter configuration',
     });
   }
 }
