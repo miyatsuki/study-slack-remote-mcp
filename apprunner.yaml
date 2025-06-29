@@ -2,13 +2,13 @@ version: 1.0
 runtime: python311
 build:
   commands:
-    pre_build:
-      - echo "Starting build process"
     build:
-      - pip install --upgrade pip
+      - echo "Current directory: $(pwd)"
+      - echo "Python version: $(python --version)"
+      - echo "Listing files:"
+      - ls -la
       - pip install -r requirements.txt
 run:
-  runtime-version: 3.11
   command: python server.py
   network:
     port: 8080
