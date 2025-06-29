@@ -30,13 +30,13 @@ uv run python server.py
 uv run mcp run uv --directory /path/to/study-slack-remote-mcp run python server.py
 ```
 
-**AWS App Runner Deployment:**
+**AWS App Runner Deployment (ECR-based):**
 ```bash
-# Deploy infrastructure with CDK (creates App Runner with GitHub integration)
-cd infrastructure && cdk deploy SlackMcpStack-dev
+# Build and push Docker image to ECR
+./build-and-push.sh
 
-# Manual deployment after pushing changes to GitHub
-aws apprunner start-deployment --service-arn <service-arn> --region ap-northeast-1
+# Deploy to App Runner (update existing service)
+aws apprunner update-service --service-arn <service-arn> --region ap-northeast-1
 ```
 
 ### Testing
@@ -87,7 +87,7 @@ curl http://localhost:8080/health
 - **Token mapping**: Maps between MCP tokens and Slack tokens internally
 - **Storage abstraction**: In-memory storage locally, DynamoDB in cloud
 - **Dynamic client registration**: Supports VSCode MCP extension and other clients
-- **GitHub + App Runner**: Direct deployment from GitHub repository
+- **ECR + App Runner**: Docker-based deployment to avoid Python 3.11 build issues
 - **uv package manager**: Fast, reliable dependency management
 
 ## Configuration
@@ -129,9 +129,9 @@ aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-client
    - Ensures compatibility with VSCode MCP extension
 
 3. **Infrastructure as Code**: 
-   - Use CDK for all AWS deployments
-   - GitHub integration with App Runner (no Docker/ECR needed)
-   - Manual deployment control (auto-deploy disabled by default)
+   - Docker + ECR + App Runner deployment
+   - `build-and-push.sh` for ECR image management
+   - Manual deployment control via App Runner service updates
 
 4. **Environment Management**: 
    - Use environment-specific configurations (dev/staging/prod)

@@ -140,28 +140,29 @@ The server uses FastMCP's built-in OAuth 2.0 support with dynamic client registr
 The server uses a single port:
 - **8080**: MCP server endpoint (includes health check and OAuth callback routes)
 
-### AWS App Runner Deployment
+### AWS App Runner Deployment (ECR-based)
 
-The project uses GitHub integration with AWS App Runner for production deployment:
+The project uses ECR-based deployment with AWS App Runner for production:
 
 ```bash
 # First, set up AWS Systems Manager parameters:
 aws ssm put-parameter --name "/slack-mcp/dev/client-id" --value "your-client-id" --type "String"
 aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-secret" --type "SecureString"
+aws ssm put-parameter --name "/slack-mcp/dev/service-base-url" --value "https://your-apprunner-url.awsapprunner.com" --type "String"
 
-# Deploy using CDK (creates App Runner service with GitHub integration)
-cd infrastructure
-cdk deploy SlackMcpStack-dev
+# Build and push Docker image to ECR:
+./build-and-push.sh
 
-# Manual deployment trigger (after pushing to GitHub)
-aws apprunner start-deployment --service-arn <your-service-arn>
+# Create App Runner service (if not exists) or update existing service
+aws apprunner update-service --service-arn <your-service-arn> --source-configuration '...'
 ```
 
 App Runner provides:
-- Direct deployment from GitHub repository
+- Deployment from ECR with pre-built Docker images
 - Built-in HTTPS with automatic certificates
 - Manual deployment control (auto-deploy disabled by default)
 - Auto-scaling and simplified management
+- Avoids Python 3.11 build issues with App Runner's source code deployment
 
 ## Project Structure
 
@@ -172,9 +173,12 @@ study-slack-remote-mcp/
 ├── storage_interface.py    # Storage abstraction (local/cloud)
 ├── storage_dynamodb.py     # DynamoDB storage for AWS
 ├── token_storage.py        # Local file-based token storage
-├── apprunner.yaml         # AWS App Runner configuration
+├── Dockerfile             # Docker container configuration
+├── build-and-push.sh      # ECR deployment script
+├── requirements.txt       # Python dependencies for Docker
 ├── pyproject.toml         # Project dependencies
 ├── uv.lock               # Locked dependencies
+├── tests/                 # Unit tests
 ├── infrastructure/        # AWS CDK deployment code
 ├── CLAUDE.md             # Development guidelines
 └── .env                  # Environment variables (create from .env.example)
