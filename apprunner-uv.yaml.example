@@ -1,17 +1,20 @@
+# UV を使用する場合の apprunner.yaml の例
+# 現在のpipベースの設定が動作確認できたら、この設定に切り替えることができます
+
 version: 1.0
 runtime: python311
 build:
   commands:
     pre-build:
-      - echo "Installing uv..."
-      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      # uvをpip経由でインストール
+      - pip install uv
     build:
-      - echo "Building with uv..."
-      - $HOME/.local/bin/uv sync --frozen
-      - echo "Build complete"
+      # uv syncでプロジェクトの依存関係をインストール
+      - uv sync --frozen
 run:
   runtime-version: 3.11
-  command: $HOME/.local/bin/uv run python server.py
+  # uv runを使って仮想環境内でサーバーを実行
+  command: uv run python server.py
   network:
     port: 8080
     env: PORT
