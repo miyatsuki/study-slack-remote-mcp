@@ -2,15 +2,9 @@ version: 1.0
 runtime: python311
 build:
   commands:
-    pre-build:
-      - echo "Python version:"
-      - python --version
-      - echo "Installing pip packages..."
-      - pip install --upgrade pip
     build:
-      - echo "Installing dependencies from requirements.txt..."
+      - pip install --upgrade pip
       - pip install -r requirements.txt
-      - echo "Build complete"
 run:
   runtime-version: 3.11
   command: python server.py
