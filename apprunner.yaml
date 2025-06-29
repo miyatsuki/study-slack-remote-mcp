@@ -3,17 +3,7 @@ runtime: python311
 build:
   commands:
     build:
-      - echo "=== Git Information ==="
-      - git log --oneline -5
-      - git branch -a
-      - git status
-      - echo "=== Current commit ==="
-      - git rev-parse HEAD
-      - echo "=== Environment Info ==="
-      - pwd
-      - python3 --version
-      - ls -la
-      - echo "=== Build completed ==="
+      - echo "Build phase"
 run:
   runtime-version: 3.11
   pre-run:
