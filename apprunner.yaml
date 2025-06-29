@@ -3,9 +3,8 @@ runtime: python311
 build:
   commands:
     build:
-      - echo "Current directory: $(pwd)"
-      - echo "Python version: $(python --version)"
-      - echo "Listing files:"
+      - pwd
+      - python --version
       - ls -la
       - pip install -r requirements.txt
 run:
