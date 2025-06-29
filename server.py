@@ -73,6 +73,7 @@ slack_oauth_provider = SlackOAuthProvider()
 auth_settings = AuthSettings(
     required_scopes=["chat:write", "channels:read"],
     issuer_url=os.getenv("SERVICE_BASE_URL", "http://localhost:8080"),
+    resource_server_url=os.getenv("SERVICE_BASE_URL", "http://localhost:8080"),
     service_documentation_url="https://github.com/miyatsuki/study-slack-remote-mcp",
     client_registration_options=ClientRegistrationOptions(
         enabled=True,
