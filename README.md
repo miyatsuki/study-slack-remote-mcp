@@ -5,11 +5,11 @@ A Model Context Protocol (MCP) server that enables LLMs to interact with Slack w
 ## Features
 
 - 🔐 **OAuth 2.0 Authentication**: Secure Slack OAuth flow with automatic token management
-- 🚀 **MCP SDK**: Built with the official MCP SDK
-- 💾 **Token Persistence**: Tokens are saved locally for seamless reconnection
+- 🚀 **FastMCP Framework**: Built with the official MCP SDK's FastMCP framework
+- 💾 **Token Persistence**: Tokens are saved locally or in DynamoDB for cloud deployments
 - 📱 **Slack Integration**: Post messages and list channels in Slack workspaces
-- 🔄 **Session Management**: Automatic session handling with isolation
-- ☁️ **Cloud-ready**: Supports deployment to AWS App Runner with CDK
+- 🔄 **Dynamic Client Registration**: Supports VSCode MCP extension and other clients
+- ☁️ **GitHub + App Runner**: Deploy directly from GitHub with AWS App Runner
 
 ## Prerequisites
 
@@ -34,12 +34,11 @@ A Model Context Protocol (MCP) server that enables LLMs to interact with Slack w
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/slack-mcp-server.git
-cd slack-mcp-server
+git clone https://github.com/miyatsuki/study-slack-remote-mcp.git
+cd study-slack-remote-mcp
 
 # Install dependencies using uv
-uv venv
-uv pip install -e .
+uv sync
 ```
 
 ### 3. Configuration
@@ -51,7 +50,8 @@ Create a `.env` file:
 SLACK_CLIENT_ID=your_client_id
 SLACK_CLIENT_SECRET=your_client_secret
 
-# OAuth callbacks now use MCP server port (8000)
+# Optional: Service base URL (for production deployments)
+# SERVICE_BASE_URL=https://your-apprunner-url.awsapprunner.com
 ```
 
 ### 4. Run the Server
@@ -65,6 +65,12 @@ nohup uv run python server.py > server.log 2>&1 &
 ```
 
 ## Usage
+
+### With VSCode MCP Extension
+
+1. Install the MCP extension for VSCode
+2. Connect to the server URL: `http://localhost:8080/mcp/`
+3. The OAuth flow will start automatically when you first use a tool
 
 ### With Claude Desktop
 
@@ -120,71 +126,58 @@ Add to your Claude Desktop configuration:
 
 ## Authentication
 
-The server operates in single-user mode due to MCP SDK limitations. The official MCP SDK's FastMCP doesn't provide access to HTTP headers, preventing multi-user identification.
+The server uses FastMCP's built-in OAuth 2.0 support with dynamic client registration. This allows compatibility with various MCP clients including VSCode's MCP extension.
 
 ### Token Management
 
-- Tokens are stored with the format: `{client_id}:default_user`
-- Tokens are persisted locally in JSONL format (or DynamoDB in cloud)
-- OAuth flow required on first use
-- Tokens are validated before use
-
-### Custom Client Example
-
-```python
-import httpx
-
-headers = {
-    "x-user-id": "alice@example.com",
-    "Content-Type": "application/json"
-}
-
-async with httpx.AsyncClient() as client:
-    response = await client.post(
-        "http://localhost:8000/mcp/",
-        headers=headers,
-        json={"jsonrpc": "2.0", "method": "tools/list", "id": "1"}
-    )
-```
+- OAuth tokens are mapped between MCP tokens and Slack tokens internally
+- Tokens are persisted locally in memory (or DynamoDB in cloud)
+- OAuth flow starts automatically when tools are first used
+- Dynamic client registration supported for VSCode and other clients
 
 ## Port Configuration
 
 The server uses a single port:
-- **8000**: MCP server endpoint (includes health check and OAuth callback routes)
+- **8080**: MCP server endpoint (includes health check and OAuth callback routes)
 
 ### AWS App Runner Deployment
 
-The project includes AWS CDK infrastructure for production deployment using App Runner for faster, simpler deployments:
+The project uses GitHub integration with AWS App Runner for production deployment:
 
 ```bash
-# Deploy to AWS
-cd infrastructure
-./deploy.sh
-
-# Configure parameters in AWS Systems Manager:
+# First, set up AWS Systems Manager parameters:
 aws ssm put-parameter --name "/slack-mcp/dev/client-id" --value "your-client-id" --type "String"
 aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-secret" --type "SecureString"
+
+# Deploy using CDK (creates App Runner service with GitHub integration)
+cd infrastructure
+cdk deploy SlackMcpStack-dev
+
+# Manual deployment trigger (after pushing to GitHub)
+aws apprunner start-deployment --service-arn <your-service-arn>
 ```
 
 App Runner provides:
+- Direct deployment from GitHub repository
 - Built-in HTTPS with automatic certificates
-- Fast deployment without long consistency checks
+- Manual deployment control (auto-deploy disabled by default)
 - Auto-scaling and simplified management
 
 ## Project Structure
 
 ```
-slack-mcp-server/
-├── server.py               # Main MCP server with OAuth (MCP SDK)
-├── slack_auth_provider.py  # Slack OAuth implementation
-├── token_verifier.py       # Token validation and session management
-├── session_manager.py      # Session-to-token mapping
-├── token_storage.py        # Token persistence layer
+study-slack-remote-mcp/
+├── server.py               # Main MCP server using FastMCP framework
+├── slack_oauth_provider.py # Slack OAuth provider implementation
 ├── storage_interface.py    # Storage abstraction (local/cloud)
 ├── storage_dynamodb.py     # DynamoDB storage for AWS
-├── infrastructure/         # AWS CDK deployment code
-├── test_fastmcp_client.py  # Test client for development
-└── .env                    # Environment variables
+├── token_storage.py        # Local file-based token storage
+├── apprunner.yaml         # AWS App Runner configuration
+├── pyproject.toml         # Project dependencies
+├── uv.lock               # Locked dependencies
+├── infrastructure/        # AWS CDK deployment code
+├── CLAUDE.md             # Development guidelines
+└── .env                  # Environment variables (create from .env.example)
 ```
 
 ## Development
@@ -192,14 +185,11 @@ slack-mcp-server/
 ### Testing
 
 ```bash
-# Run the test client
-uv run python test_fastmcp_client.py
-
 # Check server health
-curl http://localhost:8000/health
+curl http://localhost:8080/health
 
-# View OAuth status
-curl http://localhost:8000/oauth/status
+# Test with MCP client
+mcp run uv --directory /path/to/study-slack-remote-mcp run python server.py
 ```
 
 ### Debugging
@@ -214,34 +204,29 @@ tail -f server.log
 ### Port Already in Use
 
 ```bash
-# Check what's using port 8000
-lsof -i :8000
+# Check what's using port 8080
+lsof -i :8080
 
-# Kill process using port 8000 if needed
-kill -9 $(lsof -ti:8000)
+# Kill process using port 8080 if needed
+kill -9 $(lsof -ti:8080)
 ```
 
 ### OAuth Errors
 
 1. **bad_redirect_uri**: Ensure the redirect URL in Slack app matches exactly:
-   - Must include the full path: `http://localhost:8000/oauth/callback`
-   - Port must be 8000 (MCP server port)
+   - Must include the full path: `http://localhost:8080/slack/callback`
+   - Port must be 8080 (MCP server port)
    
 2. **invalid_client_id**: Verify SLACK_CLIENT_ID in .env
 
 3. **Token not found**: Complete OAuth by authorizing in browser
 
-### SSL Certificate Warnings
-
-The server auto-generates self-signed certificates. In your browser:
-- Click "Advanced" → "Proceed to localhost"
-
 ## Security Considerations
 
-- OAuth tokens are stored locally with user isolation
-- Each user has separate authentication
-- Tokens validated before each use
-- OAuth callbacks use HTTP locally (browser-based flow)
+- OAuth tokens are mapped between MCP tokens and Slack tokens
+- Tokens stored in memory locally, DynamoDB in production
+- Dynamic client registration supports various MCP clients
+- OAuth callbacks use HTTPS in production (App Runner)
 
 ## Contributing
 

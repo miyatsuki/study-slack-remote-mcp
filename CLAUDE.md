@@ -11,13 +11,12 @@ This is a Python MCP (Model Context Protocol) server that provides Slack integra
 ### Setup and Installation
 ```bash
 # Using uv (recommended)
-uv venv
-uv pip install -e .
+uv sync
 
 # Alternative using pip
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
+pip install .
 ```
 
 ### Running the Server
@@ -33,20 +32,20 @@ uv run mcp run uv --directory /path/to/study-slack-remote-mcp run python server.
 
 **AWS App Runner Deployment:**
 ```bash
-# One-command deployment with CDK
-cd infrastructure && ./deploy.sh
-
-# Manual CDK deployment
+# Deploy infrastructure with CDK (creates App Runner with GitHub integration)
 cd infrastructure && cdk deploy SlackMcpStack-dev
+
+# Manual deployment after pushing changes to GitHub
+aws apprunner start-deployment --service-arn <service-arn> --region ap-northeast-1
 ```
 
 ### Testing
 ```bash
-# Run the MCP SDK test client
-uv run python test_mcp_client.py
+# Test with MCP CLI client
+mcp run uv --directory /path/to/study-slack-remote-mcp run python server.py
 
-# Test basic MCP server
-uv run python server_test.py
+# Health check
+curl http://localhost:8080/health
 ```
 
 ## Architecture
@@ -73,11 +72,12 @@ uv run python server_test.py
 
 ### Authentication Flow
 
-1. Client connects to MCP server → creates unique session
-2. Server checks for existing valid token in session
-3. If no token: initiates OAuth flow with local HTTPS callback server
-4. User authorizes in browser → token stored in session
-5. Subsequent requests use cached token until expiry
+1. Client connects to MCP server → dynamic client registration
+2. Server checks for existing valid token
+3. If no token: initiates OAuth flow with browser redirect
+4. User authorizes in Slack → redirected to `/slack/callback`
+5. Token exchange: Slack token ↔ MCP token mapping
+6. Subsequent requests use cached token until expiry
 
 ### Key Design Decisions
 
@@ -86,7 +86,9 @@ uv run python server_test.py
 - **Unified server**: All endpoints (MCP, health, OAuth) on single port 8080
 - **Token mapping**: Maps between MCP tokens and Slack tokens internally
 - **Storage abstraction**: In-memory storage locally, DynamoDB in cloud
-- **OAuth-only authentication**: Uses only OAuth 2.0 flow for secure authentication
+- **Dynamic client registration**: Supports VSCode MCP extension and other clients
+- **GitHub + App Runner**: Direct deployment from GitHub repository
+- **uv package manager**: Fast, reliable dependency management
 
 ## Configuration
 
@@ -121,9 +123,20 @@ aws ssm put-parameter --name "/slack-mcp/dev/client-secret" --value "your-client
    - OAuth callbacks handled by custom route on MCP server
    - Simplifies deployment and configuration
 
-3. **Infrastructure as Code**: Use CDK for all AWS deployments. Manual resource creation is discouraged. The `infrastructure/` directory contains all AWS resources defined as code. Now using AWS App Runner for simplified deployment without long consistency checks.
+2. **VSCode Compatibility**: 
+   - Middleware removes unsupported `device_code` grant type from VSCode requests
+   - Dynamic client registration accepts any client ID
+   - Ensures compatibility with VSCode MCP extension
 
-4. **Environment Management**: Use environment-specific configurations (dev/staging/prod) through CDK context parameters and Parameter Store paths.
+3. **Infrastructure as Code**: 
+   - Use CDK for all AWS deployments
+   - GitHub integration with App Runner (no Docker/ECR needed)
+   - Manual deployment control (auto-deploy disabled by default)
+
+4. **Environment Management**: 
+   - Use environment-specific configurations (dev/staging/prod)
+   - SSM Parameter Store for secrets
+   - `apprunner.yaml` for runtime configuration
 
 5. **Framework References**: 
    - MCP Python SDK reference: https://github.com/modelcontextprotocol/python-sdk/tree/main
