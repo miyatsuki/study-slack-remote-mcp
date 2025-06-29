@@ -3,15 +3,17 @@ runtime: python311
 build:
   commands:
     pre-build:
-      - echo "Installing uv..."
-      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - echo "Python version:"
+      - python --version
+      - echo "Installing pip packages..."
+      - pip install --upgrade pip
     build:
-      - echo "Building with uv..."
-      - $HOME/.local/bin/uv sync --frozen
+      - echo "Installing dependencies from requirements.txt..."
+      - pip install -r requirements.txt
       - echo "Build complete"
 run:
   runtime-version: 3.11
-  command: $HOME/.local/bin/uv run python server.py
+  command: python server.py
   network:
     port: 8080
     env: PORT
